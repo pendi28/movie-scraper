@@ -20,7 +20,7 @@ video { width: 100%; height: 100%; display: block; }
 
 <div id="loader">
   <div class="spinner"></div>
-  <div style="margin-top: 15px; font-size: 14px; color: #94a3b8;">Menyiapkan Player Bebas Iklan...</div>
+  <div style="margin-top: 15px; font-size: 14px; color: #94a3b8;">Menyiapkan Player...</div>
 </div>
 
 <div id="player">
@@ -29,7 +29,7 @@ video { width: 100%; height: 100%; display: block; }
 
 <div id="err">
   <div style="font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px;">Gagal Memuat Konten</div>
-  <div id="err-detail" style="color: #ef4444; font-size: 13px;"></div>
+  <div id="err-detail" style="color: #ef4444; font-size: 13px; max-width: 80%;"></div>
 </div>
 
 <script>
@@ -44,6 +44,8 @@ if (id) {
     .then(r => r.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
+      // Pastikan data url ada sebelum memutar
+      if (!data.url) throw new Error("Link stream tidak ditemukan");
       play(data.url, data.subtitle); 
     })
     .catch(err => {
@@ -51,39 +53,52 @@ if (id) {
       document.getElementById('err').style.display = 'flex';
       document.getElementById('err-detail').textContent = err.message;
     });
-} else {
-    document.getElementById('loader').style.display = 'none';
 }
 
 function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
 
-  // LOGIKA PASANG SEMUA SUBTITLE YANG TERSEDIA
+  // PERBAIKAN: Logika pasang subtitle yang lebih aman (Anti-Error toLowerCase)
   if (subtitleData && Array.isArray(subtitleData)) {
     subtitleData.forEach((sub) => {
-      const track = document.createElement('track');
-      track.kind = 'captions';
-      track.label = sub.label || sub.lang;
-      track.srclang = sub.lang;
-      track.src = sub.url;
-      
-      // Jika bahasa cocok dengan pilihan di Firebase, aktifkan otomatis
-      if (sub.lang === subLang || sub.label.toLowerCase().includes('indonesia')) {
-        track.default = true;
+      if (sub && sub.url) {
+        const track = document.createElement('track');
+        track.kind = 'captions';
+        const label = sub.label || sub.lang || 'Unknown';
+        track.label = label;
+        track.srclang = sub.lang || 'en';
+        track.src = sub.url;
+        
+        // Pengecekan aman untuk bahasa Indonesia
+        const isIndo = label.toLowerCase().includes('indonesia') || sub.lang === 'id';
+        const isSelected = sub.lang === subLang;
+
+        if (isSelected || isIndo) {
+          track.default = true;
+        }
+        v.appendChild(track);
       }
-      v.appendChild(track);
     });
   }
 
   if (Hls.isSupported()) {
-    const hls = new Hls();
+    const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true
+    });
     hls.loadSource(streamUrl);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       v.play().catch(() => {});
+    });
+    hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.fatal) {
+            console.error("HLS Fatal Error:", data.details);
+            // Optional: fallback atau refresh m3u8
+        }
     });
   } else {
     v.src = streamUrl;
