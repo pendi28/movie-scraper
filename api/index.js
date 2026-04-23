@@ -9,24 +9,36 @@ const REFERER = 'https://vidlink.pro/';
 const ORIGIN  = 'https://vidlink.pro';
 const UA      = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124';
 
+const OS_API_KEY = 'IptcO61XBDYqjxMSanZhclSXfVJiE7WR';
+const OS_UA      = 'ZenithMovies v1.0';
+const OS_LANGS   = ['id','en','ms','ko','ja','zh','th','vi','ar','es','fr','de','pt','ru','tr','hi','tl','it'];
+
 const LANG_NAME_TO_CODE = {
   'indonesia':'id','indonesian':'id','ind':'id','in':'id',
-  'english':'en','eng':'en',
+  'english':'en','eng':'en','inggris':'en',
   'melayu':'ms','malay':'ms','may':'ms',
-  'korean':'ko','kor':'ko',
-  'japanese':'ja','jpn':'ja',
-  'chinese':'zh','chi':'zh',
-  'thai':'th','tha':'th',
-  'vietnamese':'vi','vie':'vi',
-  'arabic':'ar','ara':'ar',
-  'spanish':'es','spa':'es',
-  'french':'fr','fra':'fr',
-  'german':'de','ger':'de',
-  'portuguese':'pt','por':'pt',
-  'russian':'ru','rus':'ru',
-  'turkish':'tr','tur':'tr',
+  'korean':'ko','kor':'ko','korea':'ko',
+  'japanese':'ja','jpn':'ja','jepang':'ja',
+  'chinese':'zh','chi':'zh','mandarin':'zh','zh-cn':'zh','zh-tw':'zh',
+  'thai':'th','tha':'th','thailand':'th',
+  'vietnamese':'vi','vie':'vi','vietnam':'vi',
+  'arabic':'ar','ara':'ar','arab':'ar',
+  'spanish':'es','spa':'es','spanyol':'es',
+  'french':'fr','fra':'fr','prancis':'fr',
+  'german':'de','ger':'de','jerman':'de',
+  'portuguese':'pt','por':'pt','portugis':'pt','pt-br':'pt','pt-pt':'pt',
+  'russian':'ru','rus':'ru','rusia':'ru',
+  'turkish':'tr','tur':'tr','turki':'tr',
   'hindi':'hi','hin':'hi',
-  'tagalog':'tl','filipino':'tl'
+  'tagalog':'tl','filipino':'tl',
+  'italian':'it','italia':'it','ita':'it'
+};
+
+const LABEL_MAP = {
+  id:'Indonesia', en:'Inggris', ms:'Melayu', ko:'Korea', ja:'Jepang',
+  zh:'Mandarin', th:'Thailand', vi:'Vietnam', ar:'Arab', es:'Spanyol',
+  fr:'Prancis', de:'Jerman', pt:'Portugis', ru:'Rusia', tr:'Turki',
+  hi:'Hindi', tl:'Tagalog', it:'Italia'
 };
 
 function guessLangFromUrl(url) {
@@ -64,20 +76,87 @@ function normalizeCaption(c) {
 
   if (!lang) lang = guessLangFromUrl(url);
   if (!lang) lang = 'und';
+  label = LABEL_MAP[lang] || lang.toUpperCase();
 
-  if (!label) {
-    const map = {
-      id:'Indonesia', en:'English', ms:'Melayu', ko:'Korean', ja:'Japanese',
-      zh:'Chinese', th:'Thai', vi:'Vietnamese', ar:'Arabic', es:'Spanish',
-      fr:'French', de:'German', pt:'Portuguese', ru:'Russian', tr:'Turkish',
-      hi:'Hindi', tl:'Tagalog'
-    };
-    label = map[lang] || lang.toUpperCase();
-  }
-
-  return { url, lang, label };
+  return { url, lang, label, source: c.source || 'vidlink' };
 }
 
+// ===== OpenSubtitles =====
+async function osSearch(tmdbId, season, episode) {
+  const params = new URLSearchParams();
+  if (season) {
+    params.set('parent_tmdb_id', String(tmdbId));
+    params.set('season_number', String(season));
+    params.set('episode_number', String(episode || 1));
+  } else {
+    params.set('tmdb_id', String(tmdbId));
+  }
+  params.set('languages', OS_LANGS.join(','));
+  params.set('order_by', 'download_count');
+  params.set('order_direction', 'desc');
+
+  const url = `https://api.opensubtitles.com/api/v1/subtitles?${params.toString()}`;
+  const res = await fetch(url, {
+    headers: {
+      'Api-Key': OS_API_KEY,
+      'User-Agent': OS_UA,
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    console.warn('[OS] search failed', res.status);
+    return [];
+  }
+  const json = await res.json();
+  return json.data || [];
+}
+
+async function osDownload(fileId) {
+  const res = await fetch('https://api.opensubtitles.com/api/v1/download', {
+    method: 'POST',
+    headers: {
+      'Api-Key': OS_API_KEY,
+      'User-Agent': OS_UA,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ file_id: fileId })
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.link || null;
+}
+
+async function getOpenSubtitles(tmdbId, season, episode) {
+  if (!tmdbId) return [];
+  try {
+    const items = await osSearch(tmdbId, season, episode);
+    const bestPerLang = new Map();
+    for (const it of items) {
+      const attr = it.attributes || {};
+      const lang = (attr.language || '').toLowerCase();
+      if (!lang) continue;
+      const fileId = attr.files && attr.files[0] && attr.files[0].file_id;
+      if (!fileId) continue;
+      if (!bestPerLang.has(lang)) {
+        bestPerLang.set(lang, { fileId, lang, label: LABEL_MAP[lang] || lang.toUpperCase() });
+      }
+    }
+
+    const entries = Array.from(bestPerLang.values());
+    const resolved = await Promise.all(entries.map(async (e) => {
+      const link = await osDownload(e.fileId);
+      if (!link) return null;
+      return { url: link, lang: e.lang, label: e.label, source: 'opensubtitles' };
+    }));
+    return resolved.filter(Boolean);
+  } catch (err) {
+    console.warn('[OS] error', err.message);
+    return [];
+  }
+}
+
+// ===== WASM bootstrap =====
 let wasmReady = false;
 let bootPromise = null;
 
@@ -111,27 +190,35 @@ async function getStream(id, season, episode) {
     ? `https://vidlink.pro/api/b/tv/${token}/${season}/${episode || 1}?multiLang=1`
     : `https://vidlink.pro/api/b/movie/${token}?multiLang=1`;
 
-  const res = await fetch(apiUrl, {
-    headers: { Referer: REFERER, Origin: ORIGIN, 'User-Agent': UA }
-  });
-  if (!res.ok) throw new Error(`vidlink API returned ${res.status}`);
-  const data = await res.json();
+  const [vidlinkRes, osCaptions] = await Promise.all([
+    fetch(apiUrl, { headers: { Referer: REFERER, Origin: ORIGIN, 'User-Agent': UA } }),
+    getOpenSubtitles(id, season, episode)
+  ]);
+
+  if (!vidlinkRes.ok) throw new Error(`vidlink API returned ${vidlinkRes.status}`);
+  const data = await vidlinkRes.json();
 
   const playlist = data?.stream?.playlist;
   const rawCaptions = data?.stream?.captions || [];
 
-  // Normalisasi: petakan field vidlink (file/language) ke format konsisten (url/lang/label),
-  // buang duplikat berdasarkan lang+url, dan beri nama bahasa yang benar.
   const seen = new Set();
   const captions = [];
+
   for (const c of rawCaptions) {
     const n = normalizeCaption(c);
     if (!n) continue;
-    const key = n.lang + '|' + n.url;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(n.lang)) continue;
+    seen.add(n.lang);
     captions.push(n);
   }
+
+  for (const c of osCaptions) {
+    if (seen.has(c.lang)) continue;
+    seen.add(c.lang);
+    captions.push(c);
+  }
+
+  console.log(`[stream] vidlink subs: ${rawCaptions.length}, OS subs: ${osCaptions.length}, final: ${captions.length}`);
 
   if (!playlist) throw new Error('No playlist in response');
   return { url: playlist, subtitle: captions };
