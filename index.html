@@ -110,20 +110,6 @@ function guessLangFromUrl(url) {
   return '';
 }
 
-function makeLabel(rawLabel, lang) {
-  if (lang && LANG_NAMES[lang]) return LANG_NAMES[lang];
-  if (rawLabel) {
-    const cleaned = String(rawLabel).trim();
-    if (cleaned && !/unknown/i.test(cleaned)) {
-      const lower = cleaned.toLowerCase();
-      if (LANG_NAMES[lower]) return LANG_NAMES[lower];
-      return cleaned;
-    }
-  }
-  if (lang) return lang.toUpperCase();
-  return 'Subtitle';
-}
-
 const p = new URLSearchParams(location.search);
 const id = p.get('id'), s = p.get('s'), e = p.get('e');
 const subLang = normalizeLang(p.get('ds_lang') || 'id') || 'id';
@@ -150,21 +136,23 @@ function play(videoUrl, subtitleData) {
 
   if (subtitleData && Array.isArray(subtitleData)) {
     const seen = new Set();
-    let counter = 1;
     subtitleData.forEach((sub) => {
       if (!sub || !sub.url || seen.has(sub.url)) return;
       seen.add(sub.url);
 
       const lang = normalizeLang(sub.lang) || guessLangFromUrl(sub.url) || '';
-      let label = makeLabel(sub.label, lang);
-      if (label === 'Subtitle') label = `Subtitle ${counter++}`;
+
+      // Lewati subtitle yang bahasanya tidak bisa dipastikan
+      if (!lang || !LANG_NAMES[lang]) return;
+
+      const label = LANG_NAMES[lang];
 
       const track = document.createElement('track');
       track.kind = 'subtitles';
       track.label = label;
-      track.srclang = lang || 'und';
+      track.srclang = lang;
       track.src = sub.url;
-      if (lang && lang === subLang) track.default = true;
+      if (lang === subLang) track.default = true;
       v.appendChild(track);
     });
   }
