@@ -15,62 +15,83 @@ html, body { width: 100%; height: 100%; background: #000; font-family: system-ui
 video { width: 100%; height: 100%; display: block; }
 #err { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: #000; text-align: center; padding: 20px; }
 video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
+#sub-btn { position: fixed; top: 14px; right: 14px; z-index: 50; background: rgba(0,0,0,.65); color: #fff; border: 1px solid rgba(255,255,255,.25); padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; backdrop-filter: blur(4px); }
+#sub-btn:hover { background: rgba(0,0,0,.85); }
+#sub-menu { position: fixed; top: 56px; right: 14px; z-index: 51; background: rgba(20,20,20,.95); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; padding: 6px 0; min-width: 200px; max-height: 60vh; overflow-y: auto; display: none; backdrop-filter: blur(8px); }
+.sub-item { padding: 10px 16px; cursor: pointer; font-size: 14px; color: #ddd; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sub-item:hover { background: rgba(255,255,255,.08); color: #fff; }
+.sub-item.active { color: #f5c518; }
+.sub-item.active::after { content: '✓'; font-weight: bold; }
+.sub-item .src { font-size: 10px; color: #64748b; font-weight: 400; }
 </style>
 </head>
 <body>
 
 <div id="loader">
   <div class="spinner"></div>
-  <div style="margin-top: 15px; font-size: 14px; color: #94a3b8;">Menyiapkan Player...</div>
+  <div style="margin-top:15px;font-size:14px;color:#94a3b8;">Menyiapkan Player...</div>
 </div>
 
 <div id="player">
   <video id="v" controls autoplay playsinline crossorigin="anonymous"></video>
 </div>
 
+<button id="sub-btn" type="button">CC</button>
+<div id="sub-menu"></div>
+
 <div id="err">
-  <div style="font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px;">Gagal Memuat Konten</div>
-  <div id="err-detail" style="color: #ef4444; font-size: 13px; max-width: 80%;"></div>
+  <div style="font-size:18px;font-weight:bold;color:#fff;margin-bottom:10px;">Gagal Memuat Konten</div>
+  <div id="err-detail" style="color:#ef4444;font-size:13px;max-width:80%;"></div>
 </div>
 
 <script>
 const LANG_MAP = {
-  'id':'Indonesia','in':'Indonesia','ind':'Indonesia','indonesian':'Indonesia',
-  'en':'English','eng':'English','english':'English',
-  'ms':'Melayu','may':'Melayu','malay':'Melayu',
-  'ko':'Korean','kor':'Korean','korean':'Korean',
-  'ja':'Japanese','jpn':'Japanese','japanese':'Japanese',
-  'zh':'Chinese','chi':'Chinese','chinese':'Chinese',
-  'th':'Thai','tha':'Thai','thai':'Thai',
-  'vi':'Vietnamese','vie':'Vietnamese','vietnamese':'Vietnamese',
-  'ar':'Arabic','ara':'Arabic','arabic':'Arabic',
-  'es':'Spanish','spa':'Spanish','spanish':'Spanish',
-  'fr':'French','fra':'French','french':'French',
-  'de':'German','ger':'German','german':'German',
-  'pt':'Portuguese','por':'Portuguese','portuguese':'Portuguese',
-  'ru':'Russian','rus':'Russian','russian':'Russian',
-  'tr':'Turkish','tur':'Turkish','turkish':'Turkish',
-  'hi':'Hindi','hin':'Hindi','hindi':'Hindi',
-  'tl':'Tagalog','tgl':'Tagalog','tagalog':'Tagalog','filipino':'Tagalog'
+  id:'Indonesia', en:'Inggris', ms:'Melayu', ko:'Korea', ja:'Jepang',
+  zh:'Mandarin', th:'Thailand', vi:'Vietnam', ar:'Arab', es:'Spanyol',
+  fr:'Prancis', de:'Jerman', pt:'Portugis', ru:'Rusia', tr:'Turki',
+  hi:'Hindi', tl:'Tagalog', it:'Italia'
 };
+
+const SUB_LANGS = [
+  { code:'id', name:'Indonesia' },
+  { code:'en', name:'Inggris' },
+  { code:'ms', name:'Melayu' },
+  { code:'zh', name:'Mandarin' },
+  { code:'ja', name:'Jepang' },
+  { code:'ko', name:'Korea' },
+  { code:'th', name:'Thailand' },
+  { code:'vi', name:'Vietnam' },
+  { code:'ar', name:'Arab' },
+  { code:'es', name:'Spanyol' },
+  { code:'fr', name:'Prancis' },
+  { code:'de', name:'Jerman' },
+  { code:'pt', name:'Portugis' },
+  { code:'ru', name:'Rusia' },
+  { code:'tr', name:'Turki' },
+  { code:'hi', name:'Hindi' },
+  { code:'tl', name:'Tagalog' },
+  { code:'it', name:'Italia' }
+];
+
 const NAME_TO_CODE = {
   'indonesia':'id','indonesian':'id','ind':'id','in':'id',
-  'english':'en','eng':'en',
+  'english':'en','eng':'en','inggris':'en',
   'melayu':'ms','malay':'ms','may':'ms',
-  'korean':'ko','kor':'ko',
-  'japanese':'ja','jpn':'ja',
-  'chinese':'zh','chi':'zh',
-  'thai':'th','tha':'th',
-  'vietnamese':'vi','vie':'vi',
-  'arabic':'ar','ara':'ar',
-  'spanish':'es','spa':'es',
-  'french':'fr','fra':'fr',
-  'german':'de','ger':'de',
-  'portuguese':'pt','por':'pt',
-  'russian':'ru','rus':'ru',
-  'turkish':'tr','tur':'tr',
+  'korean':'ko','kor':'ko','korea':'ko',
+  'japanese':'ja','jpn':'ja','jepang':'ja',
+  'chinese':'zh','chi':'zh','mandarin':'zh',
+  'thai':'th','tha':'th','thailand':'th',
+  'vietnamese':'vi','vie':'vi','vietnam':'vi',
+  'arabic':'ar','ara':'ar','arab':'ar',
+  'spanish':'es','spa':'es','spanyol':'es',
+  'french':'fr','fra':'fr','prancis':'fr',
+  'german':'de','ger':'de','jerman':'de',
+  'portuguese':'pt','por':'pt','portugis':'pt',
+  'russian':'ru','rus':'ru','rusia':'ru',
+  'turkish':'tr','tur':'tr','turki':'tr',
   'hindi':'hi','hin':'hi',
-  'tagalog':'tl','filipino':'tl'
+  'tagalog':'tl','filipino':'tl',
+  'italian':'it','italia':'it','ita':'it'
 };
 
 const p = new URLSearchParams(location.search);
@@ -90,27 +111,19 @@ function guessLangFromUrl(url) {
 }
 
 function normalizeSub(sub) {
-  // Sinkron dengan backend Opsi A: { url, lang, label }.
-  // Tetap kompatibel kalau backend lama mengirim file/language.
   const url = sub.url || sub.file || sub.src || sub.link;
   let lang = (sub.lang || sub.language || sub.srclang || sub.languageCode || sub.iso || '').toString().toLowerCase().trim();
-  let label = (sub.label || sub.name || sub.title || sub.display || '').toString().trim();
-
   if (lang && NAME_TO_CODE[lang]) lang = NAME_TO_CODE[lang];
-  if (!lang && label) {
-    const k = label.toLowerCase();
-    if (NAME_TO_CODE[k]) lang = NAME_TO_CODE[k];
-    else if (LANG_MAP[k]) lang = k;
+  if (!lang) {
+    const label = (sub.label || sub.name || '').toLowerCase();
+    if (NAME_TO_CODE[label]) lang = NAME_TO_CODE[label];
     else for (const word of Object.keys(NAME_TO_CODE)) {
-      if (k.includes(word)) { lang = NAME_TO_CODE[word]; break; }
+      if (label.includes(word)) { lang = NAME_TO_CODE[word]; break; }
     }
   }
   if (!lang) lang = guessLangFromUrl(url) || '';
-
-  if (!label) label = LANG_MAP[lang] || (lang ? lang.toUpperCase() : 'Unknown');
-  else if (LANG_MAP[lang]) label = LANG_MAP[lang];
-
-  return { url, lang: lang || 'und', label };
+  const label = LANG_MAP[lang] || (lang ? lang.toUpperCase() : 'Tidak Dikenal');
+  return { url, lang: lang || 'und', label, source: sub.source || '' };
 }
 
 function srtToVtt(srt) {
@@ -127,16 +140,70 @@ async function loadSubtitleAsVtt(url) {
   return URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
 }
 
+const subBtn = document.getElementById('sub-btn');
+const subMenu = document.getElementById('sub-menu');
+let trackList = [];
+
+function renderSubMenu() {
+  subMenu.innerHTML = '';
+  const off = document.createElement('div');
+  off.className = 'sub-item';
+  off.dataset.idx = '-1';
+  off.textContent = 'Mati';
+  off.onclick = () => setActiveTrack(-1);
+  subMenu.appendChild(off);
+
+  const order = new Map(SUB_LANGS.map((l, i) => [l.code, i]));
+  const sorted = trackList.map((t, i) => ({ t, i }))
+    .sort((a, b) => (order.get(a.t.lang) ?? 999) - (order.get(b.t.lang) ?? 999));
+
+  sorted.forEach(({ t, i }) => {
+    const item = document.createElement('div');
+    item.className = 'sub-item';
+    item.dataset.idx = i;
+    const src = t.source ? `<span class="src">${t.source}</span>` : '';
+    item.innerHTML = `<span>${t.label}</span>${src}`;
+    item.onclick = () => setActiveTrack(i);
+    subMenu.appendChild(item);
+  });
+  updateMenuActive();
+}
+
+function updateMenuActive() {
+  const items = subMenu.querySelectorAll('.sub-item');
+  let activeIdx = -1;
+  trackList.forEach((entry, idx) => { if (entry.track.mode === 'showing') activeIdx = idx; });
+  items.forEach((el) => {
+    const idx = Number(el.dataset.idx);
+    el.classList.toggle('active', idx === activeIdx);
+  });
+}
+
+function setActiveTrack(idx) {
+  trackList.forEach((entry, i) => { entry.track.mode = (i === idx) ? 'showing' : 'hidden'; });
+  updateMenuActive();
+  subMenu.style.display = 'none';
+}
+
+subBtn.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  subMenu.style.display = (subMenu.style.display === 'block') ? 'none' : 'block';
+});
+document.addEventListener('click', (ev) => {
+  if (!subMenu.contains(ev.target) && ev.target !== subBtn) subMenu.style.display = 'none';
+});
+
 async function attachSubtitles(v, subs) {
-  if (!Array.isArray(subs)) return;
+  if (!Array.isArray(subs)) subs = [];
+  console.log('[player] subtitle dari backend:', subs.length, subs);
   const seen = new Set();
+  const loaded = [];
   for (const raw of subs) {
     if (!raw) continue;
     const sub = normalizeSub(raw);
     if (!sub.url) continue;
-    const key = sub.lang + '|' + sub.url;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(sub.lang)) continue;
+    seen.add(sub.lang);
     try {
       const vttUrl = await loadSubtitleAsVtt(sub.url);
       const track = document.createElement('track');
@@ -144,50 +211,48 @@ async function attachSubtitles(v, subs) {
       track.label = sub.label;
       track.srclang = sub.lang;
       track.src = vttUrl;
-      if (sub.lang === subLang) track.default = true;
       v.appendChild(track);
-    } catch (err) {
-      console.warn('Gagal memuat subtitle', sub, err);
-    }
+      loaded.push({ label: sub.label, lang: sub.lang, source: sub.source });
+    } catch (err) { console.warn('Gagal memuat subtitle', sub, err); }
   }
   setTimeout(() => {
+    trackList = [];
     let activated = false;
     for (let i = 0; i < v.textTracks.length; i++) {
       const t = v.textTracks[i];
+      const meta = loaded[i] || { label: t.label || t.language || 'Tidak Dikenal', lang: t.language, source: '' };
+      trackList.push({ track: t, label: meta.label, lang: meta.lang, source: meta.source });
       if (t.language === subLang && !activated) { t.mode = 'showing'; activated = true; }
-      else { t.mode = 'disabled'; }
+      else { t.mode = 'hidden'; }
     }
-    if (!activated && v.textTracks.length > 0) v.textTracks[0].mode = 'showing';
+    if (!activated && trackList.length > 0) trackList[0].track.mode = 'showing';
+    if (trackList.length > 0) {
+      subBtn.style.display = 'block';
+      subBtn.textContent = 'CC (' + trackList.length + ')';
+      renderSubMenu();
+    }
+    console.log('[player] total track aktif:', trackList.length);
   }, 800);
 }
 
 if (id) {
   const apiUrl = `/api?id=${id}${s ? '&s='+s+'&e='+(e||'1') : ''}&ds_lang=${subLang}`;
-  fetch(apiUrl)
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) throw new Error(data.error);
-      if (!data.url) throw new Error("Link stream tidak ditemukan");
-      play(data.url, data.subtitle);
-    })
-    .catch(err => {
-      document.getElementById('loader').style.display = 'none';
-      document.getElementById('err').style.display = 'flex';
-      document.getElementById('err-detail').textContent = err.message;
-    });
+  fetch(apiUrl).then(r => r.json()).then(data => {
+    if (data.error) throw new Error(data.error);
+    if (!data.url) throw new Error("Link stream tidak ditemukan");
+    play(data.url, data.subtitle);
+  }).catch(err => {
+    document.getElementById('loader').style.display = 'none';
+    document.getElementById('err').style.display = 'flex';
+    document.getElementById('err-detail').textContent = err.message;
+  });
 }
 
 function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
-
   if (Hls.isSupported()) {
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      renderTextTracksNatively: false,
-      subtitleDisplay: false
-    });
+    const hls = new Hls({ enableWorker: true, lowLatencyMode: true, renderTextTracksNatively: false, subtitleDisplay: false });
     hls.loadSource(streamUrl);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, async () => {
@@ -196,15 +261,10 @@ function play(videoUrl, subtitleData) {
       await attachSubtitles(v, subtitleData);
       v.play().catch(() => {});
     });
-    hls.on(Hls.Events.ERROR, (event, data) => {
-      if (data.fatal) console.error("HLS Fatal Error:", data.details);
-    });
+    hls.on(Hls.Events.ERROR, (event, data) => { if (data.fatal) console.error("HLS Fatal Error:", data.details); });
   } else {
     v.src = streamUrl;
-    v.oncanplay = () => {
-      document.getElementById('loader').style.display = 'none';
-      document.getElementById('player').style.display = 'block';
-    };
+    v.oncanplay = () => { document.getElementById('loader').style.display = 'none'; document.getElementById('player').style.display = 'block'; };
     v.addEventListener('loadedmetadata', () => attachSubtitles(v, subtitleData), { once: true });
   }
 }
