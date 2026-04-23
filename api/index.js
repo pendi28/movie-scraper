@@ -49,18 +49,10 @@ async function getStream(id, season, episode) {
   const data = await res.json();
 
   const playlist = data?.stream?.playlist;
-  const rawCaptions = data?.stream?.captions || data?.stream?.subtitles || data?.captions || [];
-
-  // Normalisasi ke format yang diharapkan player: { url, lang, label }
-  const subtitle = (Array.isArray(rawCaptions) ? rawCaptions : []).map(c => {
-    const url   = c.url || c.file || c.src || c.link || '';
-    const lang  = (c.language || c.lang || c.srclang || c.code || '').toString().toLowerCase();
-    const label = c.label || c.name || c.title || '';
-    return url ? { url, lang, label } : null;
-  }).filter(Boolean);
+  const captions = data?.stream?.captions || [];
 
   if (!playlist) throw new Error('No playlist in response');
-  return { url: playlist, subtitle };
+  return { url: playlist, subtitle: captions };
 }
 
 function fetchUpstream(url, redirects = 0) {
