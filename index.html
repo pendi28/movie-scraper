@@ -14,6 +14,7 @@ html, body { width: 100%; height: 100%; background: #000; font-family: system-ui
 #player { position: fixed; inset: 0; display: none; background: #000; }
 video { width: 100%; height: 100%; display: block; }
 #err { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: #000; text-align: center; padding: 20px; }
+video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
 </style>
 </head>
 <body>
@@ -33,20 +34,141 @@ video { width: 100%; height: 100%; display: block; }
 </div>
 
 <script>
+const LANG_MAP = {
+  'id':'Indonesia','in':'Indonesia','ind':'Indonesia','indonesian':'Indonesia',
+  'en':'English','eng':'English','english':'English',
+  'ms':'Melayu','may':'Melayu','malay':'Melayu',
+  'ko':'Korean','kor':'Korean','korean':'Korean',
+  'ja':'Japanese','jpn':'Japanese','japanese':'Japanese',
+  'zh':'Chinese','chi':'Chinese','chinese':'Chinese',
+  'th':'Thai','tha':'Thai','thai':'Thai',
+  'vi':'Vietnamese','vie':'Vietnamese','vietnamese':'Vietnamese',
+  'ar':'Arabic','ara':'Arabic','arabic':'Arabic',
+  'es':'Spanish','spa':'Spanish','spanish':'Spanish',
+  'fr':'French','fra':'French','french':'French',
+  'de':'German','ger':'German','german':'German',
+  'pt':'Portuguese','por':'Portuguese','portuguese':'Portuguese',
+  'ru':'Russian','rus':'Russian','russian':'Russian',
+  'tr':'Turkish','tur':'Turkish','turkish':'Turkish',
+  'hi':'Hindi','hin':'Hindi','hindi':'Hindi',
+  'tl':'Tagalog','tgl':'Tagalog','tagalog':'Tagalog','filipino':'Tagalog'
+};
+const NAME_TO_CODE = {
+  'indonesia':'id','indonesian':'id','ind':'id','in':'id',
+  'english':'en','eng':'en',
+  'melayu':'ms','malay':'ms','may':'ms',
+  'korean':'ko','kor':'ko',
+  'japanese':'ja','jpn':'ja',
+  'chinese':'zh','chi':'zh',
+  'thai':'th','tha':'th',
+  'vietnamese':'vi','vie':'vi',
+  'arabic':'ar','ara':'ar',
+  'spanish':'es','spa':'es',
+  'french':'fr','fra':'fr',
+  'german':'de','ger':'de',
+  'portuguese':'pt','por':'pt',
+  'russian':'ru','rus':'ru',
+  'turkish':'tr','tur':'tr',
+  'hindi':'hi','hin':'hi',
+  'tagalog':'tl','filipino':'tl'
+};
+
 const p = new URLSearchParams(location.search);
 const id = p.get('id'), s = p.get('s'), e = p.get('e');
-const subLang = p.get('ds_lang') || 'id';
+const subLang = (p.get('ds_lang') || 'id').toLowerCase();
+
+function guessLangFromUrl(url) {
+  if (!url) return null;
+  const clean = url.toLowerCase().split('?')[0];
+  for (const word of Object.keys(NAME_TO_CODE)) {
+    const re = new RegExp('(?:^|[^a-z])' + word + '(?:[^a-z]|$)', 'i');
+    if (re.test(clean)) return NAME_TO_CODE[word];
+  }
+  const m = clean.match(/[._\-/]([a-z]{2,3})(?=\.(?:vtt|srt)(?:$|[?&]))/);
+  if (m && (LANG_MAP[m[1]] || NAME_TO_CODE[m[1]])) return NAME_TO_CODE[m[1]] || m[1];
+  return null;
+}
+
+function normalizeSub(sub) {
+  // Sinkron dengan backend Opsi A: { url, lang, label }.
+  // Tetap kompatibel kalau backend lama mengirim file/language.
+  const url = sub.url || sub.file || sub.src || sub.link;
+  let lang = (sub.lang || sub.language || sub.srclang || sub.languageCode || sub.iso || '').toString().toLowerCase().trim();
+  let label = (sub.label || sub.name || sub.title || sub.display || '').toString().trim();
+
+  if (lang && NAME_TO_CODE[lang]) lang = NAME_TO_CODE[lang];
+  if (!lang && label) {
+    const k = label.toLowerCase();
+    if (NAME_TO_CODE[k]) lang = NAME_TO_CODE[k];
+    else if (LANG_MAP[k]) lang = k;
+    else for (const word of Object.keys(NAME_TO_CODE)) {
+      if (k.includes(word)) { lang = NAME_TO_CODE[word]; break; }
+    }
+  }
+  if (!lang) lang = guessLangFromUrl(url) || '';
+
+  if (!label) label = LANG_MAP[lang] || (lang ? lang.toUpperCase() : 'Unknown');
+  else if (LANG_MAP[lang]) label = LANG_MAP[lang];
+
+  return { url, lang: lang || 'und', label };
+}
+
+function srtToVtt(srt) {
+  srt = srt.replace(/^\uFEFF/, '').replace(/\r+/g, '');
+  srt = srt.replace(/(\d\d:\d\d:\d\d),(\d{3})/g, '$1.$2');
+  return 'WEBVTT\n\n' + srt.trim() + '\n';
+}
+
+async function loadSubtitleAsVtt(url) {
+  const proxied = '/api?url=' + encodeURIComponent(url);
+  const res = await fetch(proxied);
+  let text = await res.text();
+  if (!/^\uFEFF?WEBVTT/.test(text)) text = srtToVtt(text);
+  return URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
+}
+
+async function attachSubtitles(v, subs) {
+  if (!Array.isArray(subs)) return;
+  const seen = new Set();
+  for (const raw of subs) {
+    if (!raw) continue;
+    const sub = normalizeSub(raw);
+    if (!sub.url) continue;
+    const key = sub.lang + '|' + sub.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const vttUrl = await loadSubtitleAsVtt(sub.url);
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.label = sub.label;
+      track.srclang = sub.lang;
+      track.src = vttUrl;
+      if (sub.lang === subLang) track.default = true;
+      v.appendChild(track);
+    } catch (err) {
+      console.warn('Gagal memuat subtitle', sub, err);
+    }
+  }
+  setTimeout(() => {
+    let activated = false;
+    for (let i = 0; i < v.textTracks.length; i++) {
+      const t = v.textTracks[i];
+      if (t.language === subLang && !activated) { t.mode = 'showing'; activated = true; }
+      else { t.mode = 'disabled'; }
+    }
+    if (!activated && v.textTracks.length > 0) v.textTracks[0].mode = 'showing';
+  }, 800);
+}
 
 if (id) {
   const apiUrl = `/api?id=${id}${s ? '&s='+s+'&e='+(e||'1') : ''}&ds_lang=${subLang}`;
-  
   fetch(apiUrl)
     .then(r => r.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
-      // Pastikan data url ada sebelum memutar
       if (!data.url) throw new Error("Link stream tidak ditemukan");
-      play(data.url, data.subtitle); 
+      play(data.url, data.subtitle);
     })
     .catch(err => {
       document.getElementById('loader').style.display = 'none';
@@ -59,46 +181,23 @@ function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
 
-  // PERBAIKAN: Logika pasang subtitle yang lebih aman (Anti-Error toLowerCase)
-  if (subtitleData && Array.isArray(subtitleData)) {
-    subtitleData.forEach((sub) => {
-      if (sub && sub.url) {
-        const track = document.createElement('track');
-        track.kind = 'captions';
-        const label = sub.label || sub.lang || 'Unknown';
-        track.label = label;
-        track.srclang = sub.lang || 'en';
-        track.src = sub.url;
-        
-        // Pengecekan aman untuk bahasa Indonesia
-        const isIndo = label.toLowerCase().includes('indonesia') || sub.lang === 'id';
-        const isSelected = sub.lang === subLang;
-
-        if (isSelected || isIndo) {
-          track.default = true;
-        }
-        v.appendChild(track);
-      }
-    });
-  }
-
   if (Hls.isSupported()) {
     const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true
+      enableWorker: true,
+      lowLatencyMode: true,
+      renderTextTracksNatively: false,
+      subtitleDisplay: false
     });
     hls.loadSource(streamUrl);
     hls.attachMedia(v);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    hls.on(Hls.Events.MANIFEST_PARSED, async () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
+      await attachSubtitles(v, subtitleData);
       v.play().catch(() => {});
     });
     hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-            console.error("HLS Fatal Error:", data.details);
-            // Optional: fallback atau refresh m3u8
-        }
+      if (data.fatal) console.error("HLS Fatal Error:", data.details);
     });
   } else {
     v.src = streamUrl;
@@ -106,6 +205,7 @@ function play(videoUrl, subtitleData) {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
     };
+    v.addEventListener('loadedmetadata', () => attachSubtitles(v, subtitleData), { once: true });
   }
 }
 </script>
