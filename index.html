@@ -13,73 +13,137 @@ html, body { width: 100%; height: 100%; background: #000; font-family: system-ui
 @keyframes spin { to { transform: rotate(360deg); } }
 #player { position: fixed; inset: 0; display: none; background: #000; }
 video { width: 100%; height: 100%; display: block; }
-video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; text-shadow: 0 0 5px #000; }
-#err { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: #000; text-align: center; padding: 20px; }
+video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
+
+/* Tombol CC kustom */
+#ccBtn {
+  position: fixed; right: 14px; top: 14px; z-index: 50;
+  background: rgba(0,0,0,.65); color: #fff; border: 1px solid rgba(255,255,255,.25);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600;
+  cursor: pointer; backdrop-filter: blur(6px); display: none;
+}
+#ccBtn:hover { background: rgba(0,0,0,.85); }
+
+#ccMenu {
+  position: fixed; right: 14px; top: 56px; z-index: 51;
+  background: rgba(20,20,22,.96); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 10px; min-width: 200px; max-height: 60vh; overflow-y: auto;
+  display: none; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+}
+#ccMenu .hdr {
+  padding: 10px 14px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,.08);
+}
+#ccMenu .item {
+  padding: 11px 14px; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+#ccMenu .item:last-child { border-bottom: none; }
+#ccMenu .item:hover { background: rgba(255,255,255,.06); }
+#ccMenu .item.active { color: #f5c518; }
+#ccMenu .item .check { opacity: 0; }
+#ccMenu .item.active .check { opacity: 1; }
 </style>
 </head>
 <body>
 
 <div id="loader">
   <div class="spinner"></div>
-  <div style="margin-top: 15px; font-size: 13px; color: #94a3b8;">Menghubungkan Subtitle...</div>
+  <div style="margin-top: 15px; font-size: 13px; color: #94a3b8;">Sinkronisasi Subtitle...</div>
 </div>
 
 <div id="player">
   <video id="v" controls autoplay playsinline crossorigin="anonymous"></video>
-</div>
-
-<div id="err">
-  <div style="font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px;">Gagal Memuat Konten</div>
-  <div id="err-detail" style="color: #ef4444; font-size: 13px;"></div>
+  <button id="ccBtn" type="button">CC</button>
+  <div id="ccMenu"></div>
 </div>
 
 <script>
-// Kamus Label Bahasa agar tidak error toUpperCase
-const LANG_MAP = {
-  'id': 'Indonesia', 'en': 'English', 'ms': 'Melayu', 'zh': 'Chinese', 
-  'ja': 'Japanese', 'ko': 'Korean', 'th': 'Thai', 'vi': 'Vietnamese'
+const langNames = {
+  id:'Indonesia', in:'Indonesia', ind:'Indonesia',
+  en:'English', eng:'English',
+  ms:'Melayu', may:'Melayu', msa:'Melayu',
+  zh:'Chinese', chi:'Chinese', zho:'Chinese',
+  ja:'Japanese', jpn:'Japanese',
+  ko:'Korean', kor:'Korean',
+  ar:'Arabic', ara:'Arabic',
+  th:'Thai', tha:'Thai',
+  vi:'Vietnamese', vie:'Vietnamese',
+  es:'Spanish', spa:'Spanish',
+  fr:'French', fra:'French', fre:'French',
+  de:'German', deu:'German', ger:'German',
+  pt:'Portuguese', por:'Portuguese',
+  ru:'Russian', rus:'Russian',
+  hi:'Hindi', hin:'Hindi',
+  tr:'Turkish', tur:'Turkish'
 };
+const lang3to2 = { ind:'id', eng:'en', may:'ms', msa:'ms', chi:'zh', zho:'zh',
+  jpn:'ja', kor:'ko', ara:'ar', tha:'th', vie:'vi', spa:'es', fra:'fr', fre:'fr',
+  deu:'de', ger:'de', por:'pt', rus:'ru', hin:'hi', tur:'tr' };
+
+function normalizeLang(raw) {
+  if (!raw) return '';
+  const v = String(raw).toLowerCase().trim();
+  if (!v || v === 'unknown' || v === 'und' || v === 'xx' || v === 'null') return '';
+  if (lang3to2[v]) return lang3to2[v];
+  return v.slice(0, 2);
+}
+function guessLangFromUrl(url) {
+  if (!url) return '';
+  try {
+    const name = url.split('?')[0].split('/').pop().toLowerCase();
+    const m = name.match(/[._-]([a-z]{2,3})(?:[._-]|\.(?:vtt|srt|ass))/);
+    if (m) return normalizeLang(m[1]);
+  } catch (_) {}
+  return '';
+}
+function buildLabel(sub, lang) {
+  if (sub.label && !/unknown/i.test(sub.label) && sub.label.trim()) return sub.label.trim();
+  if (lang && langNames[lang]) return langNames[lang];
+  if (lang) return lang.toUpperCase();
+  return 'Subtitle';
+}
 
 const p = new URLSearchParams(location.search);
-const id = p.get('id'), s = p.get('s'), e = p.get('e'), subLang = p.get('ds_lang') || 'id';
+const id = p.get('id'), s = p.get('s'), e = p.get('e');
+const subLang = normalizeLang(p.get('ds_lang') || 'id') || 'id';
 
 if (id) {
   const apiUrl = `/api?id=${id}${s ? '&s='+s+'&e='+(e||'1') : ''}&ds_lang=${subLang}`;
   fetch(apiUrl).then(r => r.json()).then(data => {
     if (data.error) throw new Error(data.error);
-    play(data.url, data.subtitle); 
+    play(data.url, data.subtitle);
   }).catch(err => {
     document.getElementById('loader').style.display = 'none';
-    document.getElementById('err').style.display = 'flex';
-    document.getElementById('err-detail').textContent = err.message;
+    alert("Error: " + err.message);
   });
 }
+
+const subtitleMeta = []; // { label, lang, trackIndex }
 
 function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
 
-  // Bersihkan track lama
-  while (v.firstChild) { v.removeChild(v.firstChild); }
-
   if (subtitleData && Array.isArray(subtitleData)) {
+    const seen = new Set();
+    let idx = 0;
     subtitleData.forEach((sub) => {
-      if (sub && sub.url && sub.lang) { // Pastikan data lang ada
-        const track = document.createElement('track');
-        track.kind = 'subtitles';
-        
-        // Perbaikan: Pakai kamus atau label asli, jangan toUpperCase manual
-        let labelName = sub.label || LANG_MAP[sub.lang] || sub.lang;
-        
-        track.label = labelName;
-        track.srclang = sub.lang;
-        track.src = sub.url; 
-        
-        if (sub.lang === subLang) {
-          track.default = true;
-        }
-        v.appendChild(track);
-      }
+      if (!sub || !sub.url || seen.has(sub.url)) return;
+      seen.add(sub.url);
+      const lang = normalizeLang(sub.lang) || guessLangFromUrl(sub.url) || '';
+      const label = buildLabel(sub, lang);
+
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.label = label;
+      track.srclang = lang || 'und';
+      track.src = sub.url;
+      if (lang && lang === subLang) track.default = true;
+      v.appendChild(track);
+
+      subtitleMeta.push({ label, lang: lang || 'und', trackIndex: idx++ });
     });
   }
 
@@ -87,30 +151,89 @@ function play(videoUrl, subtitleData) {
     const hls = new Hls({ enableWorker: true });
     hls.loadSource(streamUrl);
     hls.attachMedia(v);
-    
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       v.play().catch(() => {});
-      
-      // Trik agar list bahasa muncul di menu "Teks" player
-      setTimeout(() => {
-        for (let i = 0; i < v.textTracks.length; i++) {
-          if (v.textTracks[i].language === subLang) {
-              v.textTracks[i].mode = 'showing';
-          } else {
-              v.textTracks[i].mode = 'hidden';
-          }
-        }
-      }, 800);
+      setupSubtitleMenu();
     });
+    v.onloadedmetadata = applyDefaultTrack;
   } else {
     v.src = streamUrl;
     v.oncanplay = () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
+      setupSubtitleMenu();
+      applyDefaultTrack();
     };
   }
+}
+
+function applyDefaultTrack() {
+  const v = document.getElementById('v');
+  // Matikan native rendering; kita pakai TextTrack mode 'showing' sendiri
+  let matched = false;
+  for (let i = 0; i < v.textTracks.length; i++) {
+    const tt = v.textTracks[i];
+    const meta = subtitleMeta[i];
+    if (meta && meta.lang === subLang && !matched) { tt.mode = 'showing'; matched = true; }
+    else { tt.mode = 'disabled'; }
+  }
+  if (!matched && v.textTracks.length > 0) v.textTracks[0].mode = 'showing';
+  refreshMenuActive();
+}
+
+function setupSubtitleMenu() {
+  const v = document.getElementById('v');
+  const btn = document.getElementById('ccBtn');
+  const menu = document.getElementById('ccMenu');
+  if (!subtitleMeta.length) return;
+
+  btn.style.display = 'block';
+
+  let html = '<div class="hdr">Subtitle</div>';
+  html += `<div class="item" data-idx="-1"><span>Mati</span><span class="check">✓</span></div>`;
+  subtitleMeta.forEach((m, i) => {
+    html += `<div class="item" data-idx="${i}"><span>${escapeHtml(m.label)}</span><span class="check">✓</span></div>`;
+  });
+  menu.innerHTML = html;
+
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+    refreshMenuActive();
+  };
+  document.addEventListener('click', (ev) => {
+    if (!menu.contains(ev.target) && ev.target !== btn) menu.style.display = 'none';
+  });
+
+  menu.querySelectorAll('.item').forEach(el => {
+    el.onclick = () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      for (let i = 0; i < v.textTracks.length; i++) {
+        v.textTracks[i].mode = (i === idx) ? 'showing' : 'disabled';
+      }
+      refreshMenuActive();
+      menu.style.display = 'none';
+    };
+  });
+}
+
+function refreshMenuActive() {
+  const v = document.getElementById('v');
+  const menu = document.getElementById('ccMenu');
+  if (!menu) return;
+  let active = -1;
+  for (let i = 0; i < v.textTracks.length; i++) {
+    if (v.textTracks[i].mode === 'showing') { active = i; break; }
+  }
+  menu.querySelectorAll('.item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.idx, 10) === active);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 </script>
 </body>
