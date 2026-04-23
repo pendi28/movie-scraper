@@ -13,14 +13,15 @@ html, body { width: 100%; height: 100%; background: #000; font-family: system-ui
 @keyframes spin { to { transform: rotate(360deg); } }
 #player { position: fixed; inset: 0; display: none; background: #000; }
 video { width: 100%; height: 100%; display: block; }
-video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
+/* Memperjelas tampilan teks subtitle di layar */
+video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; text-shadow: 0 0 5px #000; }
 </style>
 </head>
 <body>
 
 <div id="loader">
   <div class="spinner"></div>
-  <div style="margin-top: 15px; font-size: 13px; color: #94a3b8;">Sinkronisasi Subtitle...</div>
+  <div style="margin-top: 15px; font-size: 13px; color: #94a3b8;">Menghubungkan Daftar Bahasa...</div>
 </div>
 
 <div id="player">
@@ -28,7 +29,20 @@ video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
 </div>
 
 <script>
-const langNames = { 'id':'Indonesia', 'en':'English', 'ms':'Melayu', 'zh':'Chinese', 'ja':'Japanese', 'ko':'Korean' };
+// Kamus Label Bahasa agar tidak muncul "Unknown" atau kosong di list
+const LANG_MAP = {
+  'id': 'Indonesia',
+  'en': 'English',
+  'ms': 'Melayu',
+  'zh': 'Chinese',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'th': 'Thai',
+  'vi': 'Vietnamese',
+  'ar': 'Arabic',
+  'fr': 'French'
+};
+
 const p = new URLSearchParams(location.search);
 const id = p.get('id'), s = p.get('s'), e = p.get('e'), subLang = p.get('ds_lang') || 'id';
 
@@ -39,7 +53,7 @@ if (id) {
     play(data.url, data.subtitle); 
   }).catch(err => {
     document.getElementById('loader').style.display = 'none';
-    alert("Error: " + err.message);
+    alert("API Error: " + err.message);
   });
 }
 
@@ -47,24 +61,23 @@ function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
 
-  // 1. Tambahkan Track Subtitle secara Manual
+  // Kosongkan track lama untuk mencegah duplikasi list
+  while (v.firstChild) { v.removeChild(v.firstChild); }
+
   if (subtitleData && Array.isArray(subtitleData)) {
     subtitleData.forEach((sub) => {
       if (sub && sub.url) {
         const track = document.createElement('track');
-        track.kind = 'captions';
+        track.kind = 'subtitles'; // Menggunakan subtitles agar lebih standar untuk daftar list
         
-        let label = sub.label;
-        if (!label || label.toLowerCase().includes('unknown')) {
-            label = langNames[sub.lang] || sub.lang.toUpperCase() || 'Subtitle';
-        }
-        
-        track.label = label;
+        // Memastikan Label Bahasa muncul dengan benar di menu Teks Player
+        let labelName = sub.label || LANG_MAP[sub.lang] || sub.lang.toUpperCase();
+        track.label = labelName;
         track.srclang = sub.lang;
         track.src = sub.url; 
         
-        // Tandai sebagai default jika sesuai pilihan Firebase
-        if (sub.lang === subLang) {
+        // Jadikan Indonesia sebagai default jika dipilih di Firebase
+        if (sub.lang === subLang || labelName.toLowerCase().includes('indonesia')) {
           track.default = true;
         }
         v.appendChild(track);
@@ -72,7 +85,6 @@ function play(videoUrl, subtitleData) {
     });
   }
 
-  // 2. Load Video
   if (Hls.isSupported()) {
     const hls = new Hls({ enableWorker: true });
     hls.loadSource(streamUrl);
@@ -82,18 +94,21 @@ function play(videoUrl, subtitleData) {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       v.play().catch(() => {});
-    });
-
-    // Jalankan paksa pemilihan track setelah metadata siap
-    v.onloadedmetadata = () => {
-      for (let i = 0; i < v.textTracks.length; i++) {
-        if (v.textTracks[i].language === subLang) {
-          v.textTracks[i].mode = 'showing';
-        } else {
-          v.textTracks[i].mode = 'disabled'; // Sembunyikan yang lain tapi tetap ada di list
+      
+      // Paksa browser me-refresh daftar track yang baru dipasang
+      setTimeout(() => {
+        if (v.textTracks.length > 0) {
+          for (let i = 0; i < v.textTracks.length; i++) {
+            // Aktifkan mode agar bisa dideteksi oleh menu UI Player
+            if (v.textTracks[i].language === subLang) {
+                v.textTracks[i].mode = 'showing';
+            } else {
+                v.textTracks[i].mode = 'hidden'; // hidden agar tetap ada di list tapi tidak tampil di layar
+            }
+          }
         }
-      }
-    };
+      }, 500);
+    });
   } else {
     v.src = streamUrl;
     v.oncanplay = () => {
