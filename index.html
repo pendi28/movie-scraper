@@ -12,22 +12,23 @@ html, body { width: 100%; height: 100%; background: #000; font-family: system-ui
 .spinner { width: 45px; height: 45px; border: 4px solid rgba(255,255,255,.1); border-top-color: #f5c518; border-radius: 50%; animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #player { position: fixed; inset: 0; display: none; background: #000; }
-video { width: 100%; height: 100%; display: block; }
+video { width: 100%; height: 100%; display: block; background:#000; }
 video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
 
-/* Tombol CC kustom */
-#ccBtn {
-  position: fixed; right: 14px; top: 14px; z-index: 50;
-  background: rgba(0,0,0,.65); color: #fff; border: 1px solid rgba(255,255,255,.25);
-  border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600;
+.ovBtn {
+  position: absolute; z-index: 50;
+  background: rgba(0,0,0,.7); color: #fff; border: 1px solid rgba(255,255,255,.3);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
   cursor: pointer; backdrop-filter: blur(6px); display: none;
 }
-#ccBtn:hover { background: rgba(0,0,0,.85); }
+.ovBtn:hover { background: rgba(0,0,0,.9); }
+#ccBtn  { right: 14px;  top: 14px; }
+#fsBtn  { right: 78px;  top: 14px; }
 
 #ccMenu {
-  position: fixed; right: 14px; top: 56px; z-index: 51;
+  position: absolute; right: 14px; top: 56px; z-index: 51;
   background: rgba(20,20,22,.96); border: 1px solid rgba(255,255,255,.15);
-  border-radius: 10px; min-width: 200px; max-height: 60vh; overflow-y: auto;
+  border-radius: 10px; min-width: 220px; max-height: 60vh; overflow-y: auto;
   display: none; box-shadow: 0 10px 30px rgba(0,0,0,.5);
 }
 #ccMenu .hdr {
@@ -54,8 +55,11 @@ video::cue { background: rgba(0,0,0,0.8); color: #fff; font-size: 0.9em; }
 </div>
 
 <div id="player">
-  <video id="v" controls autoplay playsinline crossorigin="anonymous"></video>
-  <button id="ccBtn" type="button">CC</button>
+  <video id="v" controls autoplay playsinline crossorigin="anonymous"
+         controlsList="nofullscreen nodownload noremoteplayback"
+         disablePictureInPicture></video>
+  <button id="ccBtn" class="ovBtn" type="button">CC</button>
+  <button id="fsBtn" class="ovBtn" type="button" title="Fullscreen">⛶</button>
   <div id="ccMenu"></div>
 </div>
 
@@ -98,8 +102,9 @@ function guessLangFromUrl(url) {
   } catch (_) {}
   return '';
 }
-function buildLabel(sub, lang) {
-  if (sub.label && !/unknown/i.test(sub.label) && sub.label.trim()) return sub.label.trim();
+function prettyLabel(rawLabel, rawLang) {
+  const lang = normalizeLang(rawLang);
+  if (rawLabel && !/unknown/i.test(rawLabel) && rawLabel.trim()) return rawLabel.trim();
   if (lang && langNames[lang]) return langNames[lang];
   if (lang) return lang.toUpperCase();
   return 'Subtitle';
@@ -108,6 +113,8 @@ function buildLabel(sub, lang) {
 const p = new URLSearchParams(location.search);
 const id = p.get('id'), s = p.get('s'), e = p.get('e');
 const subLang = normalizeLang(p.get('ds_lang') || 'id') || 'id';
+
+let hlsRef = null;
 
 if (id) {
   const apiUrl = `/api?id=${id}${s ? '&s='+s+'&e='+(e||'1') : ''}&ds_lang=${subLang}`;
@@ -120,81 +127,111 @@ if (id) {
   });
 }
 
-const subtitleMeta = []; // { label, lang, trackIndex }
-
 function play(videoUrl, subtitleData) {
   const v = document.getElementById('v');
   const streamUrl = '/api?url=' + encodeURIComponent(videoUrl);
 
+  // Tambah track external dari API (kalau ada)
   if (subtitleData && Array.isArray(subtitleData)) {
     const seen = new Set();
-    let idx = 0;
     subtitleData.forEach((sub) => {
       if (!sub || !sub.url || seen.has(sub.url)) return;
       seen.add(sub.url);
       const lang = normalizeLang(sub.lang) || guessLangFromUrl(sub.url) || '';
-      const label = buildLabel(sub, lang);
-
       const track = document.createElement('track');
       track.kind = 'subtitles';
-      track.label = label;
+      track.label = prettyLabel(sub.label, lang);
       track.srclang = lang || 'und';
       track.src = sub.url;
       if (lang && lang === subLang) track.default = true;
       v.appendChild(track);
-
-      subtitleMeta.push({ label, lang: lang || 'und', trackIndex: idx++ });
     });
   }
 
   if (Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: true });
+    const hls = new Hls({ enableWorker: true, renderTextTracksNatively: true });
+    hlsRef = hls;
     hls.loadSource(streamUrl);
     hls.attachMedia(v);
+
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
       v.play().catch(() => {});
-      setupSubtitleMenu();
+      setupFullscreen();
+      setTimeout(rebuildSubtitleMenu, 250);
     });
-    v.onloadedmetadata = applyDefaultTrack;
+    hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, rebuildSubtitleMenu);
+
+    v.textTracks.addEventListener && v.textTracks.addEventListener('addtrack', () => setTimeout(rebuildSubtitleMenu, 100));
+    v.textTracks.addEventListener && v.textTracks.addEventListener('change', refreshMenuActive);
   } else {
     v.src = streamUrl;
     v.oncanplay = () => {
       document.getElementById('loader').style.display = 'none';
       document.getElementById('player').style.display = 'block';
-      setupSubtitleMenu();
-      applyDefaultTrack();
+      setupFullscreen();
+      setTimeout(rebuildSubtitleMenu, 250);
     };
   }
 }
 
-function applyDefaultTrack() {
+function getAllTracks() {
   const v = document.getElementById('v');
-  // Matikan native rendering; kita pakai TextTrack mode 'showing' sendiri
-  let matched = false;
+  const list = [];
+
+  // 1) External + HLS native textTracks
   for (let i = 0; i < v.textTracks.length; i++) {
     const tt = v.textTracks[i];
-    const meta = subtitleMeta[i];
-    if (meta && meta.lang === subLang && !matched) { tt.mode = 'showing'; matched = true; }
-    else { tt.mode = 'disabled'; }
+    if (tt.kind && tt.kind !== 'subtitles' && tt.kind !== 'captions') continue;
+    list.push({
+      type: 'native',
+      index: i,
+      label: prettyLabel(tt.label, tt.language),
+      lang: normalizeLang(tt.language) || 'und',
+      ref: tt
+    });
   }
-  if (!matched && v.textTracks.length > 0) v.textTracks[0].mode = 'showing';
-  refreshMenuActive();
+
+  // 2) HLS internal subtitle renditions (kalau hls.js tidak meng-expose ke textTracks)
+  if (hlsRef && Array.isArray(hlsRef.subtitleTracks) && list.length === 0) {
+    hlsRef.subtitleTracks.forEach((t, i) => {
+      list.push({
+        type: 'hls',
+        index: i,
+        label: prettyLabel(t.name, t.lang),
+        lang: normalizeLang(t.lang) || 'und'
+      });
+    });
+  }
+
+  // Dedup berdasarkan label
+  const seen = new Set();
+  return list.filter(t => {
+    const key = t.label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
-function setupSubtitleMenu() {
+function rebuildSubtitleMenu() {
   const v = document.getElementById('v');
   const btn = document.getElementById('ccBtn');
   const menu = document.getElementById('ccMenu');
-  if (!subtitleMeta.length) return;
+  const tracks = getAllTracks();
+
+  if (!tracks.length) {
+    btn.style.display = 'none';
+    return;
+  }
 
   btn.style.display = 'block';
 
   let html = '<div class="hdr">Subtitle</div>';
   html += `<div class="item" data-idx="-1"><span>Mati</span><span class="check">✓</span></div>`;
-  subtitleMeta.forEach((m, i) => {
-    html += `<div class="item" data-idx="${i}"><span>${escapeHtml(m.label)}</span><span class="check">✓</span></div>`;
+  tracks.forEach((t, i) => {
+    html += `<div class="item" data-idx="${i}"><span>${escapeHtml(t.label)}</span><span class="check">✓</span></div>`;
   });
   menu.innerHTML = html;
 
@@ -210,26 +247,86 @@ function setupSubtitleMenu() {
   menu.querySelectorAll('.item').forEach(el => {
     el.onclick = () => {
       const idx = parseInt(el.dataset.idx, 10);
-      for (let i = 0; i < v.textTracks.length; i++) {
-        v.textTracks[i].mode = (i === idx) ? 'showing' : 'disabled';
-      }
+      selectTrack(idx, tracks);
       refreshMenuActive();
       menu.style.display = 'none';
     };
   });
+
+  // Auto pilih default (sesuai ds_lang) sekali saja
+  if (!window.__autoPicked) {
+    window.__autoPicked = true;
+    let pick = tracks.findIndex(t => t.lang === subLang);
+    if (pick < 0) pick = 0;
+    selectTrack(pick, tracks);
+    refreshMenuActive();
+  }
+}
+
+function selectTrack(idx, tracks) {
+  const v = document.getElementById('v');
+  if (idx === -1) {
+    for (let i = 0; i < v.textTracks.length; i++) v.textTracks[i].mode = 'disabled';
+    if (hlsRef) try { hlsRef.subtitleTrack = -1; } catch(_){}
+    return;
+  }
+  const chosen = tracks[idx];
+  if (!chosen) return;
+
+  if (chosen.type === 'native') {
+    for (let i = 0; i < v.textTracks.length; i++) {
+      v.textTracks[i].mode = (i === chosen.index) ? 'showing' : 'disabled';
+    }
+    // Sinkron juga ke hls jika cocok lang
+    if (hlsRef && Array.isArray(hlsRef.subtitleTracks)) {
+      const hidx = hlsRef.subtitleTracks.findIndex(t => normalizeLang(t.lang) === chosen.lang);
+      if (hidx >= 0) try { hlsRef.subtitleTrack = hidx; } catch(_){}
+    }
+  } else if (chosen.type === 'hls') {
+    try { hlsRef.subtitleTrack = chosen.index; } catch(_){}
+  }
 }
 
 function refreshMenuActive() {
   const v = document.getElementById('v');
   const menu = document.getElementById('ccMenu');
   if (!menu) return;
+  const tracks = getAllTracks();
   let active = -1;
-  for (let i = 0; i < v.textTracks.length; i++) {
-    if (v.textTracks[i].mode === 'showing') { active = i; break; }
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    if (t.type === 'native' && v.textTracks[t.index] && v.textTracks[t.index].mode === 'showing') {
+      active = i; break;
+    }
+    if (t.type === 'hls' && hlsRef && hlsRef.subtitleTrack === t.index) {
+      active = i; break;
+    }
   }
   menu.querySelectorAll('.item').forEach(el => {
     el.classList.toggle('active', parseInt(el.dataset.idx, 10) === active);
   });
+}
+
+function setupFullscreen() {
+  const fsBtn = document.getElementById('fsBtn');
+  const player = document.getElementById('player');
+  fsBtn.style.display = 'block';
+
+  fsBtn.onclick = async (ev) => {
+    ev.stopPropagation();
+    try {
+      const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!isFs) {
+        if (player.requestFullscreen) await player.requestFullscreen();
+        else if (player.webkitRequestFullscreen) player.webkitRequestFullscreen();
+        try { await screen.orientation.lock('landscape'); } catch(_) {}
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        try { screen.orientation.unlock(); } catch(_) {}
+      }
+    } catch (e) {}
+  };
 }
 
 function escapeHtml(s) {
