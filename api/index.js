@@ -9,6 +9,75 @@ const REFERER = 'https://vidlink.pro/';
 const ORIGIN  = 'https://vidlink.pro';
 const UA      = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124';
 
+const LANG_NAME_TO_CODE = {
+  'indonesia':'id','indonesian':'id','ind':'id','in':'id',
+  'english':'en','eng':'en',
+  'melayu':'ms','malay':'ms','may':'ms',
+  'korean':'ko','kor':'ko',
+  'japanese':'ja','jpn':'ja',
+  'chinese':'zh','chi':'zh',
+  'thai':'th','tha':'th',
+  'vietnamese':'vi','vie':'vi',
+  'arabic':'ar','ara':'ar',
+  'spanish':'es','spa':'es',
+  'french':'fr','fra':'fr',
+  'german':'de','ger':'de',
+  'portuguese':'pt','por':'pt',
+  'russian':'ru','rus':'ru',
+  'turkish':'tr','tur':'tr',
+  'hindi':'hi','hin':'hi',
+  'tagalog':'tl','filipino':'tl'
+};
+
+function guessLangFromUrl(url) {
+  if (!url) return '';
+  const clean = String(url).toLowerCase().split('?')[0];
+  for (const word of Object.keys(LANG_NAME_TO_CODE)) {
+    const re = new RegExp('(?:^|[^a-z])' + word + '(?:[^a-z]|$)', 'i');
+    if (re.test(clean)) return LANG_NAME_TO_CODE[word];
+  }
+  const m = clean.match(/[._\-/]([a-z]{2,3})(?=\.(?:vtt|srt)(?:$|[?&]))/);
+  if (m && LANG_NAME_TO_CODE[m[1]]) return LANG_NAME_TO_CODE[m[1]];
+  if (m && /^[a-z]{2}$/.test(m[1])) return m[1];
+  return '';
+}
+
+function normalizeCaption(c) {
+  if (!c) return null;
+  const url = c.file || c.url || c.src || c.link;
+  if (!url) return null;
+
+  let lang = (c.language || c.lang || c.srclang || c.languageCode || c.iso || '').toString().toLowerCase().trim();
+  let label = (c.label || c.name || c.title || c.display || '').toString().trim();
+
+  if (lang && LANG_NAME_TO_CODE[lang]) lang = LANG_NAME_TO_CODE[lang];
+
+  if (!lang && label) {
+    const k = label.toLowerCase();
+    if (LANG_NAME_TO_CODE[k]) lang = LANG_NAME_TO_CODE[k];
+    else {
+      for (const word of Object.keys(LANG_NAME_TO_CODE)) {
+        if (k.includes(word)) { lang = LANG_NAME_TO_CODE[word]; break; }
+      }
+    }
+  }
+
+  if (!lang) lang = guessLangFromUrl(url);
+  if (!lang) lang = 'und';
+
+  if (!label) {
+    const map = {
+      id:'Indonesia', en:'English', ms:'Melayu', ko:'Korean', ja:'Japanese',
+      zh:'Chinese', th:'Thai', vi:'Vietnamese', ar:'Arabic', es:'Spanish',
+      fr:'French', de:'German', pt:'Portuguese', ru:'Russian', tr:'Turkish',
+      hi:'Hindi', tl:'Tagalog'
+    };
+    label = map[lang] || lang.toUpperCase();
+  }
+
+  return { url, lang, label };
+}
+
 let wasmReady = false;
 let bootPromise = null;
 
@@ -38,7 +107,6 @@ async function getStream(id, season, episode) {
   const token = globalThis.getAdv(String(id));
   if (!token) throw new Error('getAdv returned null');
 
-  // UPDATE: multiLang=1 agar file subtitle ikut terkirim
   const apiUrl = season
     ? `https://vidlink.pro/api/b/tv/${token}/${season}/${episode || 1}?multiLang=1`
     : `https://vidlink.pro/api/b/movie/${token}?multiLang=1`;
@@ -48,10 +116,23 @@ async function getStream(id, season, episode) {
   });
   if (!res.ok) throw new Error(`vidlink API returned ${res.status}`);
   const data = await res.json();
-  
+
   const playlist = data?.stream?.playlist;
-  const captions = data?.stream?.captions || []; // Menangkap daftar subtitle
-  
+  const rawCaptions = data?.stream?.captions || [];
+
+  // Normalisasi: petakan field vidlink (file/language) ke format konsisten (url/lang/label),
+  // buang duplikat berdasarkan lang+url, dan beri nama bahasa yang benar.
+  const seen = new Set();
+  const captions = [];
+  for (const c of rawCaptions) {
+    const n = normalizeCaption(c);
+    if (!n) continue;
+    const key = n.lang + '|' + n.url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    captions.push(n);
+  }
+
   if (!playlist) throw new Error('No playlist in response');
   return { url: playlist, subtitle: captions };
 }
