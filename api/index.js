@@ -38,7 +38,6 @@ async function getStream(id, season, episode) {
   const token = globalThis.getAdv(String(id));
   if (!token) throw new Error('getAdv returned null');
 
-  // UPDATE: multiLang=1 agar file subtitle ikut terkirim
   const apiUrl = season
     ? `https://vidlink.pro/api/b/tv/${token}/${season}/${episode || 1}?multiLang=1`
     : `https://vidlink.pro/api/b/movie/${token}?multiLang=1`;
@@ -48,12 +47,20 @@ async function getStream(id, season, episode) {
   });
   if (!res.ok) throw new Error(`vidlink API returned ${res.status}`);
   const data = await res.json();
-  
+
   const playlist = data?.stream?.playlist;
-  const captions = data?.stream?.captions || []; // Menangkap daftar subtitle
-  
+  const rawCaptions = data?.stream?.captions || data?.stream?.subtitles || data?.captions || [];
+
+  // Normalisasi ke format yang diharapkan player: { url, lang, label }
+  const subtitle = (Array.isArray(rawCaptions) ? rawCaptions : []).map(c => {
+    const url   = c.url || c.file || c.src || c.link || '';
+    const lang  = (c.language || c.lang || c.srclang || c.code || '').toString().toLowerCase();
+    const label = c.label || c.name || c.title || '';
+    return url ? { url, lang, label } : null;
+  }).filter(Boolean);
+
   if (!playlist) throw new Error('No playlist in response');
-  return { url: playlist, subtitle: captions };
+  return { url: playlist, subtitle };
 }
 
 function fetchUpstream(url, redirects = 0) {
